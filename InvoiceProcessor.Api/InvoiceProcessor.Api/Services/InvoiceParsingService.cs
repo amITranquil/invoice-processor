@@ -61,55 +61,110 @@ namespace InvoiceProcessor.Api.Services
         {
             var lowerText = text.ToLower();
 
-            // Satış faturası patterns
-            if (lowerText.Contains("satış") || lowerText.Contains("satış faturası") ||
-                lowerText.Contains("sales invoice") || lowerText.Contains("receipt"))
-                return InvoiceType.Sale;
+            // Score-based detection for better accuracy
+            int saleScore = 0;
+            int purchaseScore = 0;
 
-            // Alış faturası patterns
-            if (lowerText.Contains("alış") || lowerText.Contains("alış faturası") ||
-                lowerText.Contains("purchase invoice") || lowerText.Contains("supplier"))
-                return InvoiceType.Purchase;
+            // Direct invoice type indicators (high weight)
+            if (lowerText.Contains("satış faturası") || lowerText.Contains("sales invoice")) saleScore += 50;
+            if (lowerText.Contains("alış faturası") || lowerText.Contains("purchase invoice")) purchaseScore += 50;
+            
+            // General type indicators (medium weight)
+            if (lowerText.Contains("satış") || lowerText.Contains("sale")) saleScore += 20;
+            if (lowerText.Contains("alış") || lowerText.Contains("purchase")) purchaseScore += 20;
+            
+            // Customer/supplier indicators (medium weight)
+            if (lowerText.Contains("müşteri") || lowerText.Contains("customer")) saleScore += 15;
+            if (lowerText.Contains("tedarikçi") || lowerText.Contains("supplier") || lowerText.Contains("vendor")) purchaseScore += 15;
+            
+            // Receipt/invoice patterns (low weight)
+            if (lowerText.Contains("fiş") || lowerText.Contains("receipt")) saleScore += 10;
+            if (lowerText.Contains("fatura") || lowerText.Contains("invoice")) 
+            {
+                // Generic invoice - slight bias toward purchase if no other indicators
+                purchaseScore += 5;
+            }
+            
+            // Direction indicators (medium weight)
+            if (lowerText.Contains("satılan") || lowerText.Contains("sold")) saleScore += 15;
+            if (lowerText.Contains("satın alınan") || lowerText.Contains("purchased")) purchaseScore += 15;
+            
+            // Payment direction (low weight)
+            if (lowerText.Contains("tahsil") || lowerText.Contains("collection")) saleScore += 5;
+            if (lowerText.Contains("ödeme") || lowerText.Contains("payment")) purchaseScore += 5;
 
-            // İade patterns
+            // Return type handling
             if (lowerText.Contains("iade") || lowerText.Contains("return"))
             {
-                if (lowerText.Contains("satış iade") || lowerText.Contains("sales return"))
+                if (saleScore > purchaseScore)
                     return InvoiceType.SaleReturn;
-                if (lowerText.Contains("alış iade") || lowerText.Contains("purchase return"))
+                else
                     return InvoiceType.PurchaseReturn;
-                
-                // Genel iade - context'e göre karar ver
-                return InvoiceType.PurchaseReturn;
             }
 
-            // Müşteri/tedarikçi bilgilerinden çıkarım yap
-            if (lowerText.Contains("müşteri") || lowerText.Contains("customer"))
+            // Determine final type based on scores
+            if (saleScore > purchaseScore)
                 return InvoiceType.Sale;
-            
-            if (lowerText.Contains("tedarikçi") || lowerText.Contains("supplier") || 
-                lowerText.Contains("vendor"))
+            else if (purchaseScore > saleScore)
                 return InvoiceType.Purchase;
-
-            // Varsayılan olarak alış faturası
-            return InvoiceType.Purchase;
+            else
+                // If scores are equal, default to purchase
+                return InvoiceType.Purchase;
         }
 
         public List<InvoiceItem> ExtractItems(string text)
         {
             var items = new List<InvoiceItem>();
             var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-
+            
+            bool inItemSection = false;
+            
             foreach (var line in lines)
             {
-                var item = TryParseItemLine(line);
-                if (item != null)
+                var cleanLine = line.Trim();
+                
+                // Skip empty lines and headers
+                if (string.IsNullOrWhiteSpace(cleanLine))
+                    continue;
+                    
+                // Detect start of items section
+                if (cleanLine.ToLower().Contains("ürün") || cleanLine.ToLower().Contains("malzeme") ||
+                    cleanLine.ToLower().Contains("açıklama") || cleanLine.ToLower().Contains("miktar") ||
+                    cleanLine.ToLower().Contains("birim") || cleanLine.ToLower().Contains("fiyat"))
                 {
-                    items.Add(item);
+                    inItemSection = true;
+                    continue;
+                }
+                
+                // Detect end of items section
+                if (cleanLine.ToLower().Contains("toplam") || cleanLine.ToLower().Contains("kdv") ||
+                    cleanLine.ToLower().Contains("total") || cleanLine.ToLower().Contains("vat"))
+                {
+                    inItemSection = false;
+                    continue;
+                }
+                
+                // Parse item if we're in the items section or if line looks like an item
+                if (inItemSection || HasItemPattern(cleanLine))
+                {
+                    var item = TryParseItemLine(cleanLine);
+                    if (item != null && !string.IsNullOrWhiteSpace(item.ProductName))
+                    {
+                        items.Add(item);
+                    }
                 }
             }
 
             return items;
+        }
+        
+        private bool HasItemPattern(string line)
+        {
+            // Check if line contains patterns typical of item lines
+            var numberCount = Regex.Matches(line, @"\d+[.,]?\d*").Count;
+            return numberCount >= 2 && line.Length > 10 && 
+                   !line.ToLower().Contains("sayfa") && 
+                   !line.ToLower().Contains("tarih");
         }
 
         private InvoiceItem? TryParseItemLine(string line)
@@ -270,21 +325,42 @@ namespace InvoiceProcessor.Api.Services
         {
             var patterns = new[]
             {
-                @"Toplam[:\s]*(\d+(?:[.,]\d+)?)",
-                @"Total[:\s]*(\d+(?:[.,]\d+)?)",
-                @"Genel\s*Toplam[:\s]*(\d+(?:[.,]\d+)?)"
+                // Turkish patterns with better number matching
+                @"Genel\s*Toplam[:\s]*([\d.,]+)\s*TL",
+                @"Toplam[:\s]*([\d.,]+)\s*TL",
+                @"TOPLAM[:\s]*([\d.,]+)\s*TL",
+                @"Total[:\s]*([\d.,]+)\s*TL",
+                @"Ödenecek\s*Tutar[:\s]*([\d.,]+)\s*TL",
+                
+                // Patterns without TL suffix
+                @"Genel\s*Toplam[:\s]*([\d.,]{3,})",
+                @"Toplam[:\s]*([\d.,]{3,})",
+                @"TOPLAM[:\s]*([\d.,]{3,})",
+                @"Total[:\s]*([\d.,]{3,})",
+                
+                // Last resort - any number followed by TL
+                @"([\d.,]+)\s*TL\s*$"
             };
 
+            decimal maxAmount = 0;
+            
             foreach (var pattern in patterns)
             {
-                var match = Regex.Match(text, pattern, RegexOptions.IgnoreCase);
-                if (match.Success)
+                var matches = Regex.Matches(text, pattern, RegexOptions.IgnoreCase | RegexOptions.Multiline);
+                foreach (Match match in matches)
                 {
-                    return ParseDecimal(match.Groups[1].Value);
+                    if (match.Success)
+                    {
+                        var amount = ParseDecimal(match.Groups[1].Value);
+                        if (amount > maxAmount)
+                        {
+                            maxAmount = amount;
+                        }
+                    }
                 }
             }
 
-            return 0;
+            return maxAmount;
         }
 
         private decimal? ExtractVatAmount(string text)
@@ -309,9 +385,72 @@ namespace InvoiceProcessor.Api.Services
 
         private decimal ParseDecimal(string value)
         {
-            // Türkçe sayı formatını handle et
-            value = value.Replace(',', '.');
-            return decimal.Parse(value, CultureInfo.InvariantCulture);
+            if (string.IsNullOrWhiteSpace(value))
+                return 0;
+
+            try
+            {
+                // Clean the value
+                value = value.Trim().Replace(" ", "");
+                
+                // Handle Turkish number format (thousands separator: . or ,, decimal separator: , or .)
+                // Example: 1.234,56 or 1,234.56 or 54760 or 54.760
+                
+                // If there are multiple separators, the last one is decimal
+                var lastDotIndex = value.LastIndexOf('.');
+                var lastCommaIndex = value.LastIndexOf(',');
+                
+                if (lastDotIndex > 0 && lastCommaIndex > 0)
+                {
+                    // Both dot and comma present
+                    if (lastDotIndex > lastCommaIndex)
+                    {
+                        // Dot is decimal separator: 1,234.56
+                        value = value.Replace(",", "");
+                    }
+                    else
+                    {
+                        // Comma is decimal separator: 1.234,56
+                        value = value.Substring(0, lastCommaIndex).Replace(".", "") + "." + value.Substring(lastCommaIndex + 1);
+                    }
+                }
+                else if (lastCommaIndex > 0)
+                {
+                    // Only comma present
+                    var beforeComma = value.Substring(0, lastCommaIndex);
+                    var afterComma = value.Substring(lastCommaIndex + 1);
+                    
+                    if (afterComma.Length <= 2)
+                    {
+                        // Comma is decimal separator: 54,760 -> 54.760
+                        value = beforeComma + "." + afterComma;
+                    }
+                    else
+                    {
+                        // Comma is thousands separator: 54,760 -> 54760
+                        value = value.Replace(",", "");
+                    }
+                }
+                else if (lastDotIndex > 0)
+                {
+                    // Only dot present
+                    var beforeDot = value.Substring(0, lastDotIndex);
+                    var afterDot = value.Substring(lastDotIndex + 1);
+                    
+                    if (afterDot.Length > 2)
+                    {
+                        // Dot is thousands separator: 54.760 -> 54760
+                        value = value.Replace(".", "");
+                    }
+                    // else: dot is decimal separator, keep as is
+                }
+                
+                return decimal.Parse(value, CultureInfo.InvariantCulture);
+            }
+            catch (Exception)
+            {
+                return 0;
+            }
         }
 
         private int CalculateConfidenceScore(Invoice invoice, string text)
