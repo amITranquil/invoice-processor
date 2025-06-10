@@ -40,6 +40,19 @@ class ApiService {
     return Invoice.fromJson(response.data);
   }
 
+  Future<Invoice> uploadInvoiceWithType(File file, String invoiceType) async {
+    final formData = FormData.fromMap({
+      'file': await MultipartFile.fromFile(
+        file.path,
+        filename: file.path.split('/').last,
+      ),
+      'invoiceType': invoiceType,
+    });
+
+    final response = await _dio.post('/invoices/upload', data: formData);
+    return Invoice.fromJson(response.data);
+  }
+
   Future<Invoice> approveInvoice(int id) async {
     final response = await _dio.post('/invoices/$id/approve');
     return Invoice.fromJson(response.data);

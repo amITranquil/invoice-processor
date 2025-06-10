@@ -18,7 +18,7 @@ namespace InvoiceProcessor.Api.Services
             _invoiceParsingService = invoiceParsingService;
         }
 
-        public async Task<Invoice> ProcessFileAsync(Stream fileStream, string fileName)
+        public async Task<Invoice> ProcessFileAsync(Stream fileStream, string fileName, string? invoiceType = null)
         {
             var filePath = await SaveFileAsync(fileStream, fileName);
 
@@ -34,7 +34,7 @@ namespace InvoiceProcessor.Api.Services
                 extractedText = await _ocrService.ExtractTextAsync(filePath);
             }
 
-            var invoice = await _invoiceParsingService.ParseInvoiceAsync(extractedText, fileName);
+            var invoice = await _invoiceParsingService.ParseInvoiceAsync(extractedText, fileName, invoiceType);
             invoice.RawText = extractedText;
 
             // Geçici dosyayı sil

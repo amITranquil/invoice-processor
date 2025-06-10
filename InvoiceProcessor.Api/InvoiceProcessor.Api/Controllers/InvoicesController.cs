@@ -45,13 +45,13 @@ namespace InvoiceProcessor.Api.Controllers
         }
 
         [HttpPost("upload")]
-        public async Task<ActionResult<Invoice>> UploadInvoice(IFormFile file)
+        public async Task<ActionResult<Invoice>> UploadInvoice(IFormFile file, string? invoiceType = null)
         {
             if (!_fileProcessingService.IsValidFileType(file.FileName))
                 return BadRequest("Geçersiz dosya türü");
 
             using var stream = file.OpenReadStream();
-            var invoice = await _fileProcessingService.ProcessFileAsync(stream, file.FileName);
+            var invoice = await _fileProcessingService.ProcessFileAsync(stream, file.FileName, invoiceType);
 
             _context.Invoices.Add(invoice);
             await _context.SaveChangesAsync();

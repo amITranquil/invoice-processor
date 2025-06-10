@@ -1,0 +1,25 @@
+SATIŞ FATURASI
+
+Fatura No: SF-2024-001
+Tarih: 10/06/2024
+
+Satıcı Firma:
+ABC Teknoloji A.Ş.
+İstanbul, Türkiye
+
+Müşteri:
+XYZ Ltd. Şti.
+Ankara, Türkiye
+
+ÜRÜNLER:
+==============================
+Laptop Dell XPS 13     1    adet    25000.00    25000.00
+Wireless Mouse         2    adet      150.00      300.00
+USB Kablo              3    adet       50.00      150.00
+==============================
+
+Ara Toplam:                    25450.00
+KDV (%18):                      4581.00
+GENEL TOPLAM:                  30031.00
+
+Teşekkür ederiz!

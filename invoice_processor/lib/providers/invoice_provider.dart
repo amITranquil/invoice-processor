@@ -41,6 +41,19 @@ class InvoiceProvider extends ChangeNotifier {
     }
   }
 
+  Future<void> uploadInvoiceWithType(File file, String invoiceType) async {
+    _setLoading(true);
+    try {
+      final invoice = await _apiService.uploadInvoiceWithType(file, invoiceType);
+      _invoices.insert(0, invoice);
+      _error = null;
+    } catch (e) {
+      _error = e.toString();
+    } finally {
+      _setLoading(false);
+    }
+  }
+
   Future<void> approveInvoice(int id) async {
     _setLoading(true);
     try {

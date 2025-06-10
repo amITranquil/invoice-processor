@@ -16,8 +16,8 @@ namespace InvoiceProcessor.Api.Services
 
     public interface IInvoiceParsingService
     {
-        Task<Invoice> ParseInvoiceAsync(string text, string fileName);
-        InvoiceType DetectInvoiceType(string text);
+        Task<Invoice> ParseInvoiceAsync(string text, string fileName, string? invoiceType = null);
+        InvoiceType DetectInvoiceType(string text, string? hintType = null);
         List<InvoiceItem> ExtractItems(string text);
     }
 
@@ -30,7 +30,7 @@ namespace InvoiceProcessor.Api.Services
 
     public interface IFileProcessingService
     {
-        Task<Invoice> ProcessFileAsync(Stream fileStream, string fileName);
+        Task<Invoice> ProcessFileAsync(Stream fileStream, string fileName, string? invoiceType = null);
         bool IsValidFileType(string fileName);
         Task<string> SaveFileAsync(Stream fileStream, string fileName);
     }

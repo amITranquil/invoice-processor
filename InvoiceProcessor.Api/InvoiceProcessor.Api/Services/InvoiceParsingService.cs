@@ -6,14 +6,14 @@ namespace InvoiceProcessor.Api.Services
 {
     public class InvoiceParsingService : IInvoiceParsingService
     {
-        public async Task<Invoice> ParseInvoiceAsync(string text, string fileName)
+        public async Task<Invoice> ParseInvoiceAsync(string text, string fileName, string? invoiceType = null)
         {
             return await Task.Run(() =>
             {
                 var invoice = new Invoice
                 {
                     FileName = fileName,
-                    Type = DetectInvoiceType(text),
+                    Type = DetectInvoiceType(text, invoiceType),
                     ProcessedDate = DateTime.Now,
                     Status = ProcessingStatus.PendingReview
                 };
@@ -39,22 +39,57 @@ namespace InvoiceProcessor.Api.Services
             });
         }
 
-        public InvoiceType DetectInvoiceType(string text)
+        public InvoiceType DetectInvoiceType(string text, string? hintType = null)
+        {
+            // Eğer kullanıcı fatura türünü belirttiyse, önce onu dikkate al
+            if (!string.IsNullOrEmpty(hintType))
+            {
+                return hintType.ToLower() switch
+                {
+                    "purchase" => InvoiceType.Purchase,
+                    "sale" => InvoiceType.Sale,
+                    "purchase_return" => InvoiceType.PurchaseReturn,
+                    "sale_return" => InvoiceType.SaleReturn,
+                    _ => DetectFromText(text)
+                };
+            }
+
+            return DetectFromText(text);
+        }
+
+        private InvoiceType DetectFromText(string text)
         {
             var lowerText = text.ToLower();
 
-            if (lowerText.Contains("satış") || lowerText.Contains("satış faturası"))
+            // Satış faturası patterns
+            if (lowerText.Contains("satış") || lowerText.Contains("satış faturası") ||
+                lowerText.Contains("sales invoice") || lowerText.Contains("receipt"))
                 return InvoiceType.Sale;
 
-            if (lowerText.Contains("alış") || lowerText.Contains("alış faturası"))
+            // Alış faturası patterns
+            if (lowerText.Contains("alış") || lowerText.Contains("alış faturası") ||
+                lowerText.Contains("purchase invoice") || lowerText.Contains("supplier"))
                 return InvoiceType.Purchase;
 
-            if (lowerText.Contains("iade"))
+            // İade patterns
+            if (lowerText.Contains("iade") || lowerText.Contains("return"))
             {
-                if (lowerText.Contains("satış iade"))
+                if (lowerText.Contains("satış iade") || lowerText.Contains("sales return"))
                     return InvoiceType.SaleReturn;
+                if (lowerText.Contains("alış iade") || lowerText.Contains("purchase return"))
+                    return InvoiceType.PurchaseReturn;
+                
+                // Genel iade - context'e göre karar ver
                 return InvoiceType.PurchaseReturn;
             }
+
+            // Müşteri/tedarikçi bilgilerinden çıkarım yap
+            if (lowerText.Contains("müşteri") || lowerText.Contains("customer"))
+                return InvoiceType.Sale;
+            
+            if (lowerText.Contains("tedarikçi") || lowerText.Contains("supplier") || 
+                lowerText.Contains("vendor"))
+                return InvoiceType.Purchase;
 
             // Varsayılan olarak alış faturası
             return InvoiceType.Purchase;
@@ -79,34 +114,96 @@ namespace InvoiceProcessor.Api.Services
 
         private InvoiceItem? TryParseItemLine(string line)
         {
-            // Basit regex pattern - gerçek uygulamada daha karmaşık olacak
-            var pattern = @"(.+?)\s+(\d+(?:[.,]\d+)?)\s+(\w+)\s+(\d+(?:[.,]\d+)?)\s+(\d+(?:[.,]\d+)?)";
-            var match = Regex.Match(line, pattern);
-
-            if (match.Success)
+            // Çoklu regex pattern - farklı fatura formatlarını desteklemek için
+            var patterns = new[]
             {
-                try
-                {
-                    var productName = match.Groups[1].Value.Trim();
-                    var quantity = ParseDecimal(match.Groups[2].Value);
-                    var unit = match.Groups[3].Value.Trim();
-                    var unitPrice = ParseDecimal(match.Groups[4].Value);
-                    var totalPrice = ParseDecimal(match.Groups[5].Value);
+                // Pattern 1: Ürün Adı | Miktar | Birim | Birim Fiyat | Toplam
+                @"(.+?)\s+(\d+(?:[.,]\d+)?)\s+(\w+)\s+(\d+(?:[.,]\d+)?)\s+(\d+(?:[.,]\d+)?)",
+                
+                // Pattern 2: Ürün Kodu | Ürün Adı | Miktar | Birim Fiyat | Toplam
+                @"(\w+)\s+(.+?)\s+(\d+(?:[.,]\d+)?)\s+(\d+(?:[.,]\d+)?)\s+(\d+(?:[.,]\d+)?)",
+                
+                // Pattern 3: Sadece Ürün Adı ve Toplam Fiyat
+                @"(.+?)\s+(\d+(?:[.,]\d+)?)$",
+                
+                // Pattern 4: Tab separated values
+                @"(.+?)\t+(\d+(?:[.,]\d+)?)\t+(\w+)\t+(\d+(?:[.,]\d+)?)\t+(\d+(?:[.,]\d+)?)"
+            };
 
-                    return new InvoiceItem
-                    {
-                        ProductName = productName,
-                        Quantity = quantity,
-                        Unit = unit,
-                        UnitPrice = unitPrice,
-                        TotalPrice = totalPrice,
-                        ConfidenceScore = 85
-                    };
-                }
-                catch
+            foreach (var pattern in patterns)
+            {
+                var match = Regex.Match(line.Trim(), pattern);
+                if (match.Success)
                 {
-                    return null;
+                    try
+                    {
+                        return pattern switch
+                        {
+                            var p when p == patterns[0] => new InvoiceItem
+                            {
+                                ProductName = match.Groups[1].Value.Trim(),
+                                Quantity = ParseDecimal(match.Groups[2].Value),
+                                Unit = match.Groups[3].Value.Trim(),
+                                UnitPrice = ParseDecimal(match.Groups[4].Value),
+                                TotalPrice = ParseDecimal(match.Groups[5].Value),
+                                ConfidenceScore = 90
+                            },
+                            
+                            var p when p == patterns[1] => new InvoiceItem
+                            {
+                                ProductCode = match.Groups[1].Value.Trim(),
+                                ProductName = match.Groups[2].Value.Trim(),
+                                Quantity = ParseDecimal(match.Groups[3].Value),
+                                Unit = "adet",
+                                UnitPrice = ParseDecimal(match.Groups[4].Value),
+                                TotalPrice = ParseDecimal(match.Groups[5].Value),
+                                ConfidenceScore = 85
+                            },
+                            
+                            var p when p == patterns[2] => new InvoiceItem
+                            {
+                                ProductName = match.Groups[1].Value.Trim(),
+                                Quantity = 1,
+                                Unit = "adet",
+                                UnitPrice = ParseDecimal(match.Groups[2].Value),
+                                TotalPrice = ParseDecimal(match.Groups[2].Value),
+                                ConfidenceScore = 70
+                            },
+                            
+                            var p when p == patterns[3] => new InvoiceItem
+                            {
+                                ProductName = match.Groups[1].Value.Trim(),
+                                Quantity = ParseDecimal(match.Groups[2].Value),
+                                Unit = match.Groups[3].Value.Trim(),
+                                UnitPrice = ParseDecimal(match.Groups[4].Value),
+                                TotalPrice = ParseDecimal(match.Groups[5].Value),
+                                ConfidenceScore = 95
+                            },
+                            
+                            _ => null
+                        };
+                    }
+                    catch (Exception)
+                    {
+                        continue; // Bu pattern çalışmadı, bir sonrakini dene
+                    }
                 }
+            }
+
+            // Eğer hiçbir pattern eşleşmezse ve satır ürün ismi gibi görünüyorsa
+            if (line.Length > 3 && !line.All(char.IsDigit) && 
+                !line.Contains("toplam", StringComparison.OrdinalIgnoreCase) &&
+                !line.Contains("total", StringComparison.OrdinalIgnoreCase))
+            {
+                return new InvoiceItem
+                {
+                    ProductName = line.Trim(),
+                    Quantity = 1,
+                    Unit = "adet",
+                    UnitPrice = 0,
+                    TotalPrice = 0,
+                    ConfidenceScore = 50
+                };
             }
 
             return null;

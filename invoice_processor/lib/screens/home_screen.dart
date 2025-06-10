@@ -187,8 +187,17 @@ class StockPage extends StatelessWidget {
   }
 }
 
-class UploadPage extends StatelessWidget {
+class UploadPage extends StatefulWidget {
   const UploadPage({super.key});
+
+  @override
+  State<UploadPage> createState() => _UploadPageState();
+}
+
+class _UploadPageState extends State<UploadPage> {
+  String? _selectedInvoiceType = 'purchase';
+  File? _selectedFile;
+  bool _isUploading = false;
 
   @override
   Widget build(BuildContext context) {
@@ -202,33 +211,136 @@ class UploadPage extends StatelessWidget {
             style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 24),
+          
+          // Fatura türü seçimi
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Fatura Türü',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: RadioListTile<String>(
+                          title: const Text('Alış Faturası'),
+                          subtitle: const Text('Satın alınan ürünler'),
+                          value: 'purchase',
+                          groupValue: _selectedInvoiceType,
+                          onChanged: (value) {
+                            setState(() {
+                              _selectedInvoiceType = value;
+                            });
+                          },
+                        ),
+                      ),
+                      Expanded(
+                        child: RadioListTile<String>(
+                          title: const Text('Satış Faturası'),
+                          subtitle: const Text('Satılan ürünler'),
+                          value: 'sale',
+                          groupValue: _selectedInvoiceType,
+                          onChanged: (value) {
+                            setState(() {
+                              _selectedInvoiceType = value;
+                            });
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          
+          const SizedBox(height: 24),
+          
+          // Dosya seçimi
           Expanded(
             child: Center(
               child: Card(
                 child: Container(
-                  width: 400,
-                  height: 300,
+                  width: 500,
+                  height: 350,
                   padding: const EdgeInsets.all(32),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(Icons.upload_file,
-                          size: 64, color: Colors.blue),
-                      const SizedBox(height: 16),
-                      const Text(
-                        'Fatura dosyasını seçin',
-                        style: TextStyle(fontSize: 18),
-                      ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        'PDF, JPG, PNG desteklenir',
-                        style: TextStyle(color: Colors.grey),
-                      ),
-                      const SizedBox(height: 24),
-                      ElevatedButton(
-                        onPressed: () => _selectFile(context),
-                        child: const Text('Dosya Seç'),
-                      ),
+                      if (_selectedFile == null) ...[
+                        const Icon(Icons.upload_file,
+                            size: 64, color: Colors.blue),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'Fatura dosyasını seçin',
+                          style: TextStyle(fontSize: 18),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'PDF, JPG, PNG, TIFF desteklenir',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                        const SizedBox(height: 24),
+                        ElevatedButton.icon(
+                          onPressed: _isUploading ? null : _selectFile,
+                          icon: const Icon(Icons.folder_open),
+                          label: const Text('Dosya Seç'),
+                        ),
+                      ] else ...[
+                        const Icon(Icons.description,
+                            size: 64, color: Colors.green),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Seçilen Dosya:',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          _selectedFile!.path.split('/').last,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        if (_isUploading) ...[
+                          const CircularProgressIndicator(),
+                          const SizedBox(height: 16),
+                          const Text('Fatura işleniyor...'),
+                        ] else ...[
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              ElevatedButton.icon(
+                                onPressed: _uploadFile,
+                                icon: const Icon(Icons.upload),
+                                label: const Text('Yükle ve İşle'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.green,
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              TextButton.icon(
+                                onPressed: () {
+                                  setState(() {
+                                    _selectedFile = null;
+                                  });
+                                },
+                                icon: const Icon(Icons.clear),
+                                label: const Text('İptal'),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ],
                     ],
                   ),
                 ),
@@ -240,16 +352,61 @@ class UploadPage extends StatelessWidget {
     );
   }
 
-  void _selectFile(BuildContext context) async {
+  void _selectFile() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
-      allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png'],
+      allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png', 'tiff'],
     );
 
     if (result != null && result.files.single.path != null) {
-      final file = File(result.files.single.path!);
+      setState(() {
+        _selectedFile = File(result.files.single.path!);
+      });
+    }
+  }
+
+  void _uploadFile() async {
+    if (_selectedFile == null || _selectedInvoiceType == null) return;
+
+    setState(() {
+      _isUploading = true;
+    });
+
+    try {
       if (context.mounted) {
-        context.read<InvoiceProvider>().uploadInvoice(file);
+        await context.read<InvoiceProvider>().uploadInvoiceWithType(
+          _selectedFile!,
+          _selectedInvoiceType!,
+        );
+        
+        // Success feedback
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Fatura başarıyla yüklendi ve işlendi!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+        
+        // Reset form
+        setState(() {
+          _selectedFile = null;
+          _isUploading = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _isUploading = false;
+      });
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Hata: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     }
   }

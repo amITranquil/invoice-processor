@@ -1,0 +1,25 @@
+ALIŞ FATURASI
+
+Fatura No: AF-2024-001
+Tarih: 10/06/2024
+
+Tedarikçi:
+DEF Elektronik San. Tic. Ltd. Şti.
+Bursa, Türkiye
+
+Alıcı Firma:
+ABC Teknoloji A.Ş.
+İstanbul, Türkiye
+
+SATIN ALINAN ÜRÜNLER:
+==============================
+iPhone 15 Pro          5    adet    40000.00    200000.00
+AirPods Pro            10    adet     8000.00     80000.00
+iPhone Kılıfı          20    adet      500.00     10000.00
+==============================
+
+Ara Toplam:                   290000.00
+KDV (%18):                     52200.00
+GENEL TOPLAM:                 342200.00
+
+Ödeme: Havale
