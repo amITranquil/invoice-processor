@@ -58,6 +58,12 @@ class ApiService {
     return Invoice.fromJson(response.data);
   }
 
+  Future<Invoice> updateAndApproveInvoice(Invoice invoice) async {
+    final response = await _dio.put('/invoices/${invoice.id}/update-and-approve', 
+        data: invoice.toJson());
+    return Invoice.fromJson(response.data);
+  }
+
   Future<void> deleteInvoice(int id) async {
     await _dio.delete('/invoices/$id');
   }

@@ -22,7 +22,6 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    // Load data after the frame is built to avoid setState during build
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadInitialData();
     });
@@ -150,9 +149,21 @@ class StockPage extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Stok Yönetimi',
-            style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Stok Yönetimi',
+                style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
+              ),
+              ElevatedButton.icon(
+                onPressed: () {
+                  context.read<StockProvider>().loadProducts();
+                },
+                icon: const Icon(Icons.refresh),
+                label: const Text('Yenile'),
+              ),
+            ],
           ),
           const SizedBox(height: 24),
           Expanded(
@@ -162,18 +173,89 @@ class StockPage extends StatelessWidget {
                   return const Center(child: CircularProgressIndicator());
                 }
 
+                if (provider.error != null) {
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.error, size: 64, color: Colors.red),
+                        const SizedBox(height: 16),
+                        Text('Hata: ${provider.error}'),
+                        const SizedBox(height: 16),
+                        ElevatedButton(
+                          onPressed: () => provider.loadProducts(),
+                          child: const Text('Tekrar Dene'),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+
+                if (provider.products.isEmpty) {
+                  return const Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.inventory_2_outlined, size: 64, color: Colors.grey),
+                        SizedBox(height: 16),
+                        Text('Henüz ürün bulunmuyor'),
+                        SizedBox(height: 8),
+                        Text(
+                          'Fatura yükleyip onayladıktan sonra ürünler burada görünecek',
+                          style: TextStyle(color: Colors.grey),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  );
+                }
+
                 return ListView.builder(
                   itemCount: provider.products.length,
                   itemBuilder: (context, index) {
                     final product = provider.products[index];
+                    final isLowStock = product.currentStock <= product.minimumStock;
+                    
                     return Card(
+                      color: isLowStock ? Colors.red.shade50 : null,
                       child: ListTile(
-                        title: Text(product.name),
-                        subtitle: Text(
-                            'Stok: ${product.currentStock} ${product.defaultUnit}'),
-                        trailing: Text(
-                          '₺${product.lastPurchasePrice?.toStringAsFixed(2) ?? '-'}',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        leading: Icon(
+                          Icons.inventory,
+                          color: isLowStock ? Colors.red : Colors.blue,
+                        ),
+                        title: Text(
+                          product.name,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w500,
+                            color: isLowStock ? Colors.red.shade700 : null,
+                          ),
+                        ),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Stok: ${product.currentStock} ${product.defaultUnit}'),
+                            if (product.code != null)
+                              Text('Kod: ${product.code}', style: const TextStyle(fontSize: 12)),
+                          ],
+                        ),
+                        trailing: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              '₺${product.lastPurchasePrice?.toStringAsFixed(2) ?? '-'}',
+                              style: const TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            if (isLowStock)
+                              const Text(
+                                'Düşük Stok!',
+                                style: TextStyle(
+                                  color: Colors.red,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                          ],
                         ),
                       ),
                     );
@@ -196,7 +278,7 @@ class UploadPage extends StatefulWidget {
 }
 
 class _UploadPageState extends State<UploadPage> {
-  String? _selectedInvoiceType = 'purchase';
+  String _selectedInvoiceType = 'purchase'; // Default value
   File? _selectedFile;
   bool _isUploading = false;
 
@@ -221,8 +303,13 @@ class _UploadPageState extends State<UploadPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'Fatura Türü',
+                    'Fatura Türü Seçin',
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Sizin perspektifinizden fatura türünü seçin:',
+                    style: TextStyle(color: Colors.grey, fontSize: 14),
                   ),
                   const SizedBox(height: 16),
                   Row(
@@ -230,26 +317,32 @@ class _UploadPageState extends State<UploadPage> {
                       Expanded(
                         child: RadioListTile<String>(
                           title: const Text('Alış Faturası'),
-                          subtitle: const Text('Satın alınan ürünler'),
+                          subtitle: const Text('Ürün satın aldığınız fatura\n(Stok artacak)'),
                           value: 'purchase',
                           groupValue: _selectedInvoiceType,
                           onChanged: (value) {
-                            setState(() {
-                              _selectedInvoiceType = value;
-                            });
+                            if (value != null) {
+                              setState(() {
+                                _selectedInvoiceType = value;
+                              });
+                              debugPrint('Selected invoice type: $value');
+                            }
                           },
                         ),
                       ),
                       Expanded(
                         child: RadioListTile<String>(
                           title: const Text('Satış Faturası'),
-                          subtitle: const Text('Satılan ürünler'),
+                          subtitle: const Text('Ürün sattığınız fatura\n(Stok azalacak)'),
                           value: 'sale',
                           groupValue: _selectedInvoiceType,
                           onChanged: (value) {
-                            setState(() {
-                              _selectedInvoiceType = value;
-                            });
+                            if (value != null) {
+                              setState(() {
+                                _selectedInvoiceType = value;
+                              });
+                              debugPrint('Selected invoice type: $value');
+                            }
                           },
                         ),
                       ),
@@ -310,6 +403,16 @@ class _UploadPageState extends State<UploadPage> {
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
                           ),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Fatura Türü: ${_getInvoiceTypeDisplay(_selectedInvoiceType)}',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            color: Colors.blue,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
                         const SizedBox(height: 24),
                         if (_isUploading) ...[
@@ -326,6 +429,7 @@ class _UploadPageState extends State<UploadPage> {
                                 label: const Text('Yükle ve İşle'),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.green,
+                                  foregroundColor: Colors.white,
                                 ),
                               ),
                               const SizedBox(width: 16),
@@ -353,61 +457,53 @@ class _UploadPageState extends State<UploadPage> {
     );
   }
 
+  String _getInvoiceTypeDisplay(String type) {
+    switch (type) {
+      case 'purchase':
+        return 'Alış Faturası (Stok artacak)';
+      case 'sale':
+        return 'Satış Faturası (Stok azalacak)';
+      default:
+        return type;
+    }
+  }
+
   void _selectFile() async {
     try {
-      if (kDebugMode) {
-        print('Dosya seçici açılıyor...');
-      }
+      debugPrint('Dosya seçici açılıyor...');
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png', 'tiff'],
         allowMultiple: false,
       );
 
-      if (kDebugMode) {
-        print('Dosya seçici sonucu: $result');
-      }
+      debugPrint('Dosya seçici sonucu: $result');
       
       if (result != null && result.files.isNotEmpty) {
         final file = result.files.single;
-        if (kDebugMode) {
-          if (kDebugMode) {
-        }
-          print('Seçilen dosya: ${file.name}, path: ${file.path}');
-        }
+        debugPrint('Seçilen dosya: ${file.name}, path: ${file.path}');
         
         if (file.path != null) {
           final selectedFile = File(file.path!);
           
-          // Dosya varlığını kontrol et
           if (await selectedFile.exists()) {
-            if (kDebugMode) {
-              print('Dosya mevcut: ${selectedFile.path}');
-            }
+            debugPrint('Dosya mevcut: ${selectedFile.path}');
             setState(() {
               _selectedFile = selectedFile;
             });
           } else {
-            if (kDebugMode) {
-              print('Dosya bulunamadı: ${selectedFile.path}');
-            }
+            debugPrint('Dosya bulunamadı: ${selectedFile.path}');
             _showErrorMessage('Seçilen dosya bulunamadı.');
           }
         } else {
-          if (kDebugMode) {
-            print('Dosya yolu null');
-          }
+          debugPrint('Dosya yolu null');
           _showErrorMessage('Dosya yolu alınamadı.');
         }
       } else {
-        if (kDebugMode) {
-          print('Dosya seçilmedi veya sonuç null');
-        }
+        debugPrint('Dosya seçilmedi');
       }
     } catch (e) {
-      if (kDebugMode) {
-        print('Dosya seçiminde hata: $e');
-      }
+      debugPrint('Dosya seçiminde hata: $e');
       _showErrorMessage('Dosya seçiminde hata: $e');
     }
   }
@@ -424,31 +520,34 @@ class _UploadPageState extends State<UploadPage> {
   }
 
   void _uploadFile() async {
-    if (_selectedFile == null || _selectedInvoiceType == null) return;
+    if (_selectedFile == null) {
+      _showErrorMessage('Lütfen dosya seçin');
+      return;
+    }
+
+    if (_selectedInvoiceType.isEmpty) {
+      _showErrorMessage('Lütfen fatura türü seçin');
+      return;
+    }
 
     setState(() {
       _isUploading = true;
     });
 
     try {
-      if (kDebugMode) {
-        print('Dosya yükleniyor: ${_selectedFile!.path}');
-      }
-      if (kDebugMode) {
-        print('Fatura türü: $_selectedInvoiceType');
-      }
+      debugPrint('Dosya yükleniyor: ${_selectedFile!.path}');
+      debugPrint('Fatura türü: $_selectedInvoiceType');
       
       if (context.mounted) {
         await context.read<InvoiceProvider>().uploadInvoiceWithType(
           _selectedFile!,
-          _selectedInvoiceType!,
+          _selectedInvoiceType,
         );
         
-        // Success feedback
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Fatura başarıyla yüklendi ve işlendi!'),
+            SnackBar(
+              content: Text('Fatura başarıyla yüklendi! ($_selectedInvoiceType)'),
               backgroundColor: Colors.green,
             ),
           );
@@ -458,12 +557,11 @@ class _UploadPageState extends State<UploadPage> {
         setState(() {
           _selectedFile = null;
           _isUploading = false;
+          // Keep the selected invoice type for convenience
         });
       }
     } catch (e) {
-      if (kDebugMode) {
-        print('Dosya yükleme hatası: $e');
-      }
+      debugPrint('Dosya yükleme hatası: $e');
       setState(() {
         _isUploading = false;
       });

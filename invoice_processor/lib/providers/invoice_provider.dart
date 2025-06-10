@@ -70,6 +70,22 @@ class InvoiceProvider extends ChangeNotifier {
     }
   }
 
+  Future<void> approveInvoiceWithUpdates(Invoice updatedInvoice) async {
+    _setLoading(true);
+    try {
+      final result = await _apiService.updateAndApproveInvoice(updatedInvoice);
+      final index = _invoices.indexWhere((i) => i.id == updatedInvoice.id);
+      if (index != -1) {
+        _invoices[index] = result;
+      }
+      _error = null;
+    } catch (e) {
+      _error = e.toString();
+    } finally {
+      _setLoading(false);
+    }
+  }
+
   Future<void> deleteInvoice(int id) async {
     _setLoading(true);
     try {

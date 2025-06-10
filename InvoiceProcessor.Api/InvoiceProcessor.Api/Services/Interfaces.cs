@@ -25,7 +25,7 @@ namespace InvoiceProcessor.Api.Services
     {
         Task UpdateStockAsync(Invoice invoice);
         Task<List<StockMovement>> GetMovementsAsync(int? productId = null);
-        Task<Product> GetOrCreateProductAsync(string productName, string? productCode = null);
+        Task<Product> GetOrCreateProductAsync(string productName, string? productCode = null, string? unit = null);
     }
 
     public interface IFileProcessingService
