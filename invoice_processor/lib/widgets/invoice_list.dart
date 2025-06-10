@@ -21,7 +21,7 @@ class InvoiceList extends StatelessWidget {
               children: [
                 const Icon(Icons.error, size: 64, color: Colors.red),
                 const SizedBox(height: 16),
-                Text('Hata: ${provider.error}'),
+                SelectableText('Hata: ${provider.error}'),
                 const SizedBox(height: 16),
                 ElevatedButton(
                   onPressed: provider.loadInvoices,

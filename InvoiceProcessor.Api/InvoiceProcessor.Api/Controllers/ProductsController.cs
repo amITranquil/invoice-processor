@@ -60,5 +60,29 @@ namespace InvoiceProcessor.Api.Controllers
             await _context.SaveChangesAsync();
             return NoContent();
         }
+
+        [HttpPost("cleanup")]
+        public async Task<IActionResult> CleanupInvalidProducts()
+        {
+            // Remove products with invalid names (too long, containing too much junk data)
+            var invalidProducts = await _context.Products
+                .Where(p => p.Name.Length > 100 ||
+                           p.Name.Contains("TL") ||
+                           p.Name.Contains("%") ||
+                           p.Name.Contains("ETTN:") ||
+                           p.Name.Contains("Tel :") ||
+                           p.Name.Contains("Ödenecek Tutar") ||
+                           p.Name.Contains("Not:") ||
+                           p.Name.Contains("BANK") ||
+                           p.Name.StartsWith("1203/") ||
+                           p.Name.StartsWith("TCKN:") ||
+                           System.Text.RegularExpressions.Regex.IsMatch(p.Name, @"^[\d\s.,%-]+$"))
+                .ToListAsync();
+
+            _context.Products.RemoveRange(invalidProducts);
+            await _context.SaveChangesAsync();
+
+            return Ok(new { RemovedCount = invalidProducts.Count, Message = "Invalid products cleaned up" });
+        }
     }
 }

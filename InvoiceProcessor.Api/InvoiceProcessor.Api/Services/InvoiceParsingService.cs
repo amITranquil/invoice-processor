@@ -8,12 +8,17 @@ namespace InvoiceProcessor.Api.Services
     {
         public async Task<Invoice> ParseInvoiceAsync(string text, string fileName, string? invoiceType = null)
         {
+            Console.WriteLine($"[DEBUG] ParseInvoiceAsync called with fileName: '{fileName}', invoiceType: '{invoiceType}'");
+            
             return await Task.Run(() =>
             {
+                var detectedType = DetectInvoiceType(text, invoiceType);
+                Console.WriteLine($"[DEBUG] DetectInvoiceType returned: {detectedType}");
+                
                 var invoice = new Invoice
                 {
                     FileName = fileName,
-                    Type = DetectInvoiceType(text, invoiceType),
+                    Type = detectedType,
                     ProcessedDate = DateTime.Now,
                     Status = ProcessingStatus.PendingReview
                 };
@@ -35,16 +40,22 @@ namespace InvoiceProcessor.Api.Services
                 // Güven skoru hesapla
                 invoice.ConfidenceScore = CalculateConfidenceScore(invoice, text);
 
+                Console.WriteLine($"[DEBUG] Final invoice created with Type: {invoice.Type}");
                 return invoice;
             });
         }
 
         public InvoiceType DetectInvoiceType(string text, string? hintType = null)
         {
+            // Log the hint type for debugging
+            Console.WriteLine($"[DEBUG] DetectInvoiceType called with hint: '{hintType}' (IsNullOrEmpty: {string.IsNullOrEmpty(hintType)})");
+            
             // Eğer kullanıcı fatura türünü belirttiyse, önce onu dikkate al
             if (!string.IsNullOrEmpty(hintType))
             {
-                return hintType.ToLower() switch
+                Console.WriteLine($"[DEBUG] Processing hint type: '{hintType.ToLower()}'");
+                
+                var detectedType = hintType.ToLower().Trim() switch
                 {
                     "purchase" => InvoiceType.Purchase,
                     "sale" => InvoiceType.Sale,
@@ -52,9 +63,15 @@ namespace InvoiceProcessor.Api.Services
                     "sale_return" => InvoiceType.SaleReturn,
                     _ => DetectFromText(text)
                 };
+                
+                Console.WriteLine($"[DEBUG] Final detected type from hint '{hintType}': {detectedType}");
+                return detectedType;
             }
 
-            return DetectFromText(text);
+            Console.WriteLine($"[DEBUG] No hint provided, detecting from text");
+            var typeFromText = DetectFromText(text);
+            Console.WriteLine($"[DEBUG] Final detected type from text: {typeFromText}");
+            return typeFromText;
         }
 
         private InvoiceType DetectFromText(string text)
@@ -169,99 +186,184 @@ namespace InvoiceProcessor.Api.Services
 
         private InvoiceItem? TryParseItemLine(string line)
         {
-            // Çoklu regex pattern - farklı fatura formatlarını desteklemek için
+            // Clean and normalize the line
+            line = CleanItemLine(line);
+            if (string.IsNullOrWhiteSpace(line)) return null;
+
+            // Skip non-product lines
+            if (IsNonProductLine(line)) return null;
+
+            // Try to extract structured data from the line
+            var itemData = ExtractItemData(line);
+            if (itemData == null) return null;
+
+            return new InvoiceItem
+            {
+                ProductCode = itemData.Code,
+                ProductName = itemData.Name,
+                Quantity = itemData.Quantity,
+                Unit = itemData.Unit ?? "adet",
+                UnitPrice = itemData.UnitPrice,
+                TotalPrice = itemData.TotalPrice,
+                ConfidenceScore = itemData.ConfidenceScore
+            };
+        }
+
+        private string CleanItemLine(string line)
+        {
+            if (string.IsNullOrWhiteSpace(line)) return string.Empty;
+
+            // Remove excessive whitespace and normalize
+            line = Regex.Replace(line.Trim(), @"\s+", " ");
+            
+            // Remove leading numbers that are likely line numbers
+            line = Regex.Replace(line, @"^\d{1,2}\s+", "");
+            
+            return line;
+        }
+
+        private bool IsNonProductLine(string line)
+        {
+            var lowerLine = line.ToLower();
+            
+            // Skip header lines and total lines
+            var skipKeywords = new[] {
+                "toplam", "total", "kdv", "vat", "iskonto", "discount",
+                "ödenecek", "tutar", "amount", "tarih", "date", "no:",
+                "fatura", "invoice", "sayfa", "page", "ettn:", "tckn:",
+                "tel:", "phone", "adres", "address", "bank", "iban",
+                "açıklama", "description", "miktar", "quantity",
+                "birim", "unit", "fiyat", "price", "not:", "note"
+            };
+
+            return skipKeywords.Any(keyword => lowerLine.Contains(keyword)) ||
+                   line.Length < 3 ||
+                   line.All(char.IsDigit) ||
+                   Regex.IsMatch(line, @"^[\d\s.,%-]+$"); // Only numbers, spaces, and symbols
+        }
+
+        private ItemData? ExtractItemData(string line)
+        {
+            // Pattern for Turkish invoice lines: [Number] Product Name [Quantity] [Unit] [UnitPrice] [%Discount] [DiscountAmount] [%VAT] [VATAmount] [TotalPrice]
+            // Example: "1 BRIO TANK 040 LT DENGE TANKLI OTOM.HIDROFOR 6 Adet 782 TL %45,00 2.111,40 TL %18,00 464,51 TL 4.692,00"
+            
             var patterns = new[]
             {
-                // Pattern 1: Ürün Adı | Miktar | Birim | Birim Fiyat | Toplam
-                @"(.+?)\s+(\d+(?:[.,]\d+)?)\s+(\w+)\s+(\d+(?:[.,]\d+)?)\s+(\d+(?:[.,]\d+)?)",
+                // Advanced pattern for Turkish invoices with all details
+                @"^(?:\d+\s+)?(.+?)\s+(\d+(?:[.,]\d+)?)\s+(adet|kg|lt|m|cm|ad)\s+(\d+(?:[.,]\d+)?)\s*(?:tl)?\s*(?:%[\d.,]+\s+[\d.,]+\s*(?:tl)?\s*)?(?:%[\d.,]+\s+[\d.,]+\s*(?:tl)?\s*)?([\d.,]+)$",
                 
-                // Pattern 2: Ürün Kodu | Ürün Adı | Miktar | Birim Fiyat | Toplam
-                @"(\w+)\s+(.+?)\s+(\d+(?:[.,]\d+)?)\s+(\d+(?:[.,]\d+)?)\s+(\d+(?:[.,]\d+)?)",
+                // Simpler pattern: Product Quantity Unit UnitPrice TotalPrice
+                @"^(.+?)\s+(\d+(?:[.,]\d+)?)\s+(adet|kg|lt|m|cm|ad)\s+(\d+(?:[.,]\d+)?)\s*(?:tl)?\s*([\d.,]+)\s*(?:tl)?$",
                 
-                // Pattern 3: Sadece Ürün Adı ve Toplam Fiyat
-                @"(.+?)\s+(\d+(?:[.,]\d+)?)$",
+                // Product with code: Code Product Quantity UnitPrice TotalPrice
+                @"^([A-Z0-9/-]+)\s+(.+?)\s+(\d+(?:[.,]\d+)?)\s+(\d+(?:[.,]\d+)?)\s*([\d.,]+)$",
                 
-                // Pattern 4: Tab separated values
-                @"(.+?)\t+(\d+(?:[.,]\d+)?)\t+(\w+)\t+(\d+(?:[.,]\d+)?)\t+(\d+(?:[.,]\d+)?)"
+                // Simple pattern: Product TotalPrice
+                @"^(.+?)\s+([\d.,]{3,})\s*(?:tl)?$"
             };
 
             foreach (var pattern in patterns)
             {
-                var match = Regex.Match(line.Trim(), pattern);
+                var match = Regex.Match(line, pattern, RegexOptions.IgnoreCase);
                 if (match.Success)
                 {
                     try
                     {
-                        return pattern switch
+                        if (pattern == patterns[0] || pattern == patterns[1])
                         {
-                            var p when p == patterns[0] => new InvoiceItem
+                            var productName = ExtractCleanProductName(match.Groups[1].Value);
+                            if (string.IsNullOrWhiteSpace(productName)) continue;
+
+                            return new ItemData
                             {
-                                ProductName = match.Groups[1].Value.Trim(),
+                                Name = productName,
                                 Quantity = ParseDecimal(match.Groups[2].Value),
-                                Unit = match.Groups[3].Value.Trim(),
+                                Unit = match.Groups[3].Value.ToLower(),
                                 UnitPrice = ParseDecimal(match.Groups[4].Value),
                                 TotalPrice = ParseDecimal(match.Groups[5].Value),
                                 ConfidenceScore = 90
-                            },
-                            
-                            var p when p == patterns[1] => new InvoiceItem
+                            };
+                        }
+                        else if (pattern == patterns[2])
+                        {
+                            var productName = ExtractCleanProductName(match.Groups[2].Value);
+                            if (string.IsNullOrWhiteSpace(productName)) continue;
+
+                            return new ItemData
                             {
-                                ProductCode = match.Groups[1].Value.Trim(),
-                                ProductName = match.Groups[2].Value.Trim(),
+                                Code = match.Groups[1].Value.Trim(),
+                                Name = productName,
                                 Quantity = ParseDecimal(match.Groups[3].Value),
                                 Unit = "adet",
                                 UnitPrice = ParseDecimal(match.Groups[4].Value),
                                 TotalPrice = ParseDecimal(match.Groups[5].Value),
                                 ConfidenceScore = 85
-                            },
-                            
-                            var p when p == patterns[2] => new InvoiceItem
+                            };
+                        }
+                        else if (pattern == patterns[3])
+                        {
+                            var productName = ExtractCleanProductName(match.Groups[1].Value);
+                            if (string.IsNullOrWhiteSpace(productName)) continue;
+
+                            var totalPrice = ParseDecimal(match.Groups[2].Value);
+                            return new ItemData
                             {
-                                ProductName = match.Groups[1].Value.Trim(),
+                                Name = productName,
                                 Quantity = 1,
                                 Unit = "adet",
-                                UnitPrice = ParseDecimal(match.Groups[2].Value),
-                                TotalPrice = ParseDecimal(match.Groups[2].Value),
+                                UnitPrice = totalPrice,
+                                TotalPrice = totalPrice,
                                 ConfidenceScore = 70
-                            },
-                            
-                            var p when p == patterns[3] => new InvoiceItem
-                            {
-                                ProductName = match.Groups[1].Value.Trim(),
-                                Quantity = ParseDecimal(match.Groups[2].Value),
-                                Unit = match.Groups[3].Value.Trim(),
-                                UnitPrice = ParseDecimal(match.Groups[4].Value),
-                                TotalPrice = ParseDecimal(match.Groups[5].Value),
-                                ConfidenceScore = 95
-                            },
-                            
-                            _ => null
-                        };
+                            };
+                        }
                     }
-                    catch (Exception)
+                    catch (Exception ex)
                     {
-                        continue; // Bu pattern çalışmadı, bir sonrakini dene
+                        Console.WriteLine($"Error parsing line: {line}, Error: {ex.Message}");
+                        continue;
                     }
                 }
             }
 
-            // Eğer hiçbir pattern eşleşmezse ve satır ürün ismi gibi görünüyorsa
-            if (line.Length > 3 && !line.All(char.IsDigit) && 
-                !line.Contains("toplam", StringComparison.OrdinalIgnoreCase) &&
-                !line.Contains("total", StringComparison.OrdinalIgnoreCase))
-            {
-                return new InvoiceItem
-                {
-                    ProductName = line.Trim(),
-                    Quantity = 1,
-                    Unit = "adet",
-                    UnitPrice = 0,
-                    TotalPrice = 0,
-                    ConfidenceScore = 50
-                };
-            }
-
             return null;
+        }
+
+        private string ExtractCleanProductName(string rawName)
+        {
+            if (string.IsNullOrWhiteSpace(rawName)) return string.Empty;
+
+            // Clean the product name
+            rawName = rawName.Trim();
+            
+            // Remove common prefixes/suffixes that are not part of product name
+            rawName = Regex.Replace(rawName, @"^\d+\s*[-.]?\s*", ""); // Remove leading numbers
+            rawName = Regex.Replace(rawName, @"\s*tl\s*$", "", RegexOptions.IgnoreCase); // Remove trailing TL
+            
+            // Remove excessive pricing information mixed in name
+            rawName = Regex.Replace(rawName, @"\s+%\d+[.,]\d+.*$", ""); // Remove percentage and following text
+            rawName = Regex.Replace(rawName, @"\s+\d+[.,]\d+\s*tl.*$", "", RegexOptions.IgnoreCase); // Remove prices
+            
+            // Clean up multiple spaces
+            rawName = Regex.Replace(rawName, @"\s+", " ").Trim();
+            
+            // Validate minimum length
+            if (rawName.Length < 3) return string.Empty;
+            
+            // Don't return if it's mostly numbers or special characters
+            if (Regex.IsMatch(rawName, @"^[\d\s.,%-]{3,}$")) return string.Empty;
+            
+            return rawName;
+        }
+
+        private class ItemData
+        {
+            public string? Code { get; set; }
+            public string Name { get; set; } = string.Empty;
+            public decimal Quantity { get; set; }
+            public string? Unit { get; set; }
+            public decimal UnitPrice { get; set; }
+            public decimal TotalPrice { get; set; }
+            public int ConfidenceScore { get; set; }
         }
 
         private string? ExtractInvoiceNumber(string text)

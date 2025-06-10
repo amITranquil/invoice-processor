@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
@@ -353,15 +354,72 @@ class _UploadPageState extends State<UploadPage> {
   }
 
   void _selectFile() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png', 'tiff'],
-    );
+    try {
+      if (kDebugMode) {
+        print('Dosya seçici açılıyor...');
+      }
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png', 'tiff'],
+        allowMultiple: false,
+      );
 
-    if (result != null && result.files.single.path != null) {
-      setState(() {
-        _selectedFile = File(result.files.single.path!);
-      });
+      if (kDebugMode) {
+        print('Dosya seçici sonucu: $result');
+      }
+      
+      if (result != null && result.files.isNotEmpty) {
+        final file = result.files.single;
+        if (kDebugMode) {
+          if (kDebugMode) {
+        }
+          print('Seçilen dosya: ${file.name}, path: ${file.path}');
+        }
+        
+        if (file.path != null) {
+          final selectedFile = File(file.path!);
+          
+          // Dosya varlığını kontrol et
+          if (await selectedFile.exists()) {
+            if (kDebugMode) {
+              print('Dosya mevcut: ${selectedFile.path}');
+            }
+            setState(() {
+              _selectedFile = selectedFile;
+            });
+          } else {
+            if (kDebugMode) {
+              print('Dosya bulunamadı: ${selectedFile.path}');
+            }
+            _showErrorMessage('Seçilen dosya bulunamadı.');
+          }
+        } else {
+          if (kDebugMode) {
+            print('Dosya yolu null');
+          }
+          _showErrorMessage('Dosya yolu alınamadı.');
+        }
+      } else {
+        if (kDebugMode) {
+          print('Dosya seçilmedi veya sonuç null');
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('Dosya seçiminde hata: $e');
+      }
+      _showErrorMessage('Dosya seçiminde hata: $e');
+    }
+  }
+
+  void _showErrorMessage(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
@@ -373,6 +431,13 @@ class _UploadPageState extends State<UploadPage> {
     });
 
     try {
+      if (kDebugMode) {
+        print('Dosya yükleniyor: ${_selectedFile!.path}');
+      }
+      if (kDebugMode) {
+        print('Fatura türü: $_selectedInvoiceType');
+      }
+      
       if (context.mounted) {
         await context.read<InvoiceProvider>().uploadInvoiceWithType(
           _selectedFile!,
@@ -396,6 +461,9 @@ class _UploadPageState extends State<UploadPage> {
         });
       }
     } catch (e) {
+      if (kDebugMode) {
+        print('Dosya yükleme hatası: $e');
+      }
       setState(() {
         _isUploading = false;
       });
